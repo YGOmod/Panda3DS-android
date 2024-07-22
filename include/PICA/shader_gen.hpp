@@ -4,15 +4,10 @@
 #include "PICA/gpu.hpp"
 #include "PICA/pica_frag_config.hpp"
 #include "PICA/regs.hpp"
+#include "PICA/shader_gen_types.hpp"
 #include "helpers.hpp"
 
 namespace PICA::ShaderGen {
-	// Graphics API this shader is targetting
-	enum class API { GL, GLES, Vulkan };
-
-	// Shading language to use (Only GLSL for the time being)
-	enum class Language { GLSL };
-
 	class FragmentGenerator {
 		API api;
 		Language language;
@@ -28,6 +23,8 @@ namespace PICA::ShaderGen {
 		void compileLights(std::string& shader, const PICA::FragmentConfig& config);
 		void compileLUTLookup(std::string& shader, const PICA::FragmentConfig& config, u32 lightIndex, u32 lutID);
 		bool isSamplerEnabled(u32 environmentID, u32 lutID);
+
+		void compileFog(std::string& shader, const PICA::FragmentConfig& config);
 
 	  public:
 		FragmentGenerator(API api, Language language) : api(api), language(language) {}

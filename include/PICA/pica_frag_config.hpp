@@ -12,11 +12,11 @@
 namespace PICA {
 	struct OutputConfig {
 		union {
-			u32 raw;
+			u32 raw{};
 			// Merge the enable + compare function into 1 field to avoid duplicate shaders
 			// enable == off means a CompareFunction of Always
 			BitField<0, 3, CompareFunction> alphaTestFunction;
-			BitField<4, 1, u32> depthMapEnable;
+			BitField<3, 1, u32> depthMapEnable;
 		};
 	};
 
@@ -27,6 +27,18 @@ namespace PICA {
 		// There's 6 TEV stages, and each one is configured via 4 word-sized registers
 		// (+ the constant color register, which we don't include here, otherwise we'd generate too many shaders)
 		std::array<u32, 4 * 6> tevConfigs;
+	};
+
+	struct FogConfig {
+		union {
+			u32 raw{};
+
+			BitField<0, 3, FogMode> mode;
+			BitField<3, 1, u32> flipDepth;
+			BitField<8, 8, u32> fogColorR;
+			BitField<16, 8, u32> fogColorG;
+			BitField<24, 8, u32> fogColorB;
+		};
 	};
 
 	struct Light {
@@ -49,8 +61,8 @@ namespace PICA {
 			BitField<0, 1, u32> enable;
 			BitField<1, 1, u32> absInput;
 			BitField<2, 3, u32> type;
+			BitField<5, 3, u32> scale;
 		};
-		float scale;
 	};
 
 	struct LightingConfig {
@@ -142,46 +154,45 @@ namespace PICA {
 			const u32 lutAbs = regs[InternalRegs::LightLUTAbs];
 			const u32 lutSelect = regs[InternalRegs::LightLUTSelect];
 			const u32 lutScale = regs[InternalRegs::LightLUTScale];
-			static constexpr float scales[] = {1.0f, 2.0f, 4.0f, 8.0f, 0.0f, 0.0f, 0.25f, 0.5f};
 
 			if (d0.enable) {
 				d0.absInput = Helpers::getBit<1>(lutAbs) == 0;
 				d0.type = Helpers::getBits<0, 3>(lutSelect);
-				d0.scale = scales[Helpers::getBits<0, 3>(lutScale)];
+				d0.scale = Helpers::getBits<0, 3>(lutScale);
 			}
 
 			if (d1.enable) {
 				d1.absInput = Helpers::getBit<5>(lutAbs) == 0;
 				d1.type = Helpers::getBits<4, 3>(lutSelect);
-				d1.scale = scales[Helpers::getBits<4, 3>(lutScale)];
+				d1.scale = Helpers::getBits<4, 3>(lutScale);
 			}
 
 			sp.absInput = Helpers::getBit<9>(lutAbs) == 0;
 			sp.type = Helpers::getBits<8, 3>(lutSelect);
-			sp.scale = scales[Helpers::getBits<8, 3>(lutScale)];
+			sp.scale = Helpers::getBits<8, 3>(lutScale);
 
 			if (fr.enable) {
 				fr.absInput = Helpers::getBit<13>(lutAbs) == 0;
 				fr.type = Helpers::getBits<12, 3>(lutSelect);
-				fr.scale = scales[Helpers::getBits<12, 3>(lutScale)];
+				fr.scale = Helpers::getBits<12, 3>(lutScale);
 			}
 
 			if (rb.enable) {
 				rb.absInput = Helpers::getBit<17>(lutAbs) == 0;
 				rb.type = Helpers::getBits<16, 3>(lutSelect);
-				rb.scale = scales[Helpers::getBits<16, 3>(lutScale)];
+				rb.scale = Helpers::getBits<16, 3>(lutScale);
 			}
 
 			if (rg.enable) {
 				rg.absInput = Helpers::getBit<21>(lutAbs) == 0;
 				rg.type = Helpers::getBits<20, 3>(lutSelect);
-				rg.scale = scales[Helpers::getBits<20, 3>(lutScale)];
+				rg.scale = Helpers::getBits<20, 3>(lutScale);
 			}
 
 			if (rr.enable) {
 				rr.absInput = Helpers::getBit<25>(lutAbs) == 0;
 				rr.type = Helpers::getBits<24, 3>(lutSelect);
-				rr.scale = scales[Helpers::getBits<24, 3>(lutScale)];
+				rr.scale = Helpers::getBits<24, 3>(lutScale);
 			}
 		}
 	};
@@ -190,6 +201,7 @@ namespace PICA {
 	struct FragmentConfig {
 		OutputConfig outConfig;
 		TextureConfig texConfig;
+		FogConfig fogConfig;
 		LightingConfig lighting;
 
 		bool operator==(const FragmentConfig& config) const {
@@ -221,12 +233,21 @@ namespace PICA {
 			setupTevStage(4);
 			setupTevStage(5);
 #undef setupTevStage
+
+			fogConfig.mode = (FogMode)Helpers::getBits<0, 3>(regs[InternalRegs::TexEnvUpdateBuffer]);
+
+			if (fogConfig.mode == FogMode::Fog) {
+				fogConfig.flipDepth = Helpers::getBit<16>(regs[InternalRegs::TexEnvUpdateBuffer]);
+				fogConfig.fogColorR = Helpers::getBits<0, 8>(regs[InternalRegs::FogColor]);
+				fogConfig.fogColorG = Helpers::getBits<8, 8>(regs[InternalRegs::FogColor]);
+				fogConfig.fogColorB = Helpers::getBits<16, 8>(regs[InternalRegs::FogColor]);
+			}
 		}
 	};
 
 	static_assert(
 		std::has_unique_object_representations<OutputConfig>() && std::has_unique_object_representations<TextureConfig>() &&
-		std::has_unique_object_representations<Light>()
+		std::has_unique_object_representations<FogConfig>() && std::has_unique_object_representations<Light>()
 	);
 }  // namespace PICA
 

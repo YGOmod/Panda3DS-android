@@ -130,7 +130,7 @@ std::string FragmentGenerator::generate(const FragmentConfig& config) {
 		uniform sampler2D u_tex0;
 		uniform sampler2D u_tex1;
 		uniform sampler2D u_tex2;
-		uniform sampler2D u_tex_lighting_lut;
+		uniform sampler2D u_tex_luts;
 	)";
 
 	ret += uniformDefinition;
@@ -144,7 +144,7 @@ std::string FragmentGenerator::generate(const FragmentConfig& config) {
 			}
 
 			float lutLookup(uint lut, int index) {
-				return texelFetch(u_tex_lighting_lut, ivec2(index, int(lut)), 0).r;
+				return texelFetch(u_tex_luts, ivec2(index, int(lut)), 0).r;
 			}
 
 			vec3 regToColor(uint reg) {
@@ -193,6 +193,8 @@ std::string FragmentGenerator::generate(const FragmentConfig& config) {
 	for (int i = 0; i < 6; i++) {
 		compileTEV(ret, i, config);
 	}
+
+	compileFog(ret, config);
 
 	applyAlphaTest(ret, config);
 
@@ -617,7 +619,7 @@ void FragmentGenerator::compileLUTLookup(std::string& shader, const PICA::Fragme
 		return;
 	}
 
-	float scale = lut.scale;
+	uint scale = lut.scale;
 	uint inputID = lut.type;
 	bool absEnabled = lut.absInput;
 	
@@ -634,17 +636,45 @@ void FragmentGenerator::compileLUTLookup(std::string& shader, const PICA::Fragme
 			break;
 	}
 
+	static constexpr float scales[] = {1.0f, 2.0f, 4.0f, 8.0f, 0.0f, 0.0f, 0.25f, 0.5f};
+
 	if (absEnabled) {
 		bool twoSidedDiffuse = config.lighting.lights[lightIndex].twoSidedDiffuse;
 		shader += twoSidedDiffuse ? "lut_lookup_delta = abs(lut_lookup_delta);\n" : "lut_lookup_delta = max(lut_lookup_delta, 0.0);\n";
 		shader += "lut_lookup_result = lutLookup(" + std::to_string(lutIndex) + ", int(clamp(floor(lut_lookup_delta * 256.0), 0.0, 255.0)));\n";
-		if (scale != 1.0) {
-			shader += "lut_lookup_result *= " + std::to_string(scale) + ";\n";
+		if (scale != 0) {
+			shader += "lut_lookup_result *= " + std::to_string(scales[scale]) + ";\n";
 		}
 	} else {
 		// Range is [-1, 1] so we need to map it to [0, 1]
 		shader += "lut_lookup_index = int(clamp(floor(lut_lookup_delta * 128.0), -128.f, 127.f));\n";
 		shader += "if (lut_lookup_index < 0) lut_lookup_index += 256;\n";
-		shader += "lut_lookup_result = lutLookup(" + std::to_string(lutIndex) + ", lut_lookup_index) *" + std::to_string(scale) + ";\n";
+		shader += "lut_lookup_result = lutLookup(" + std::to_string(lutIndex) + ", lut_lookup_index);\n";
+		if (scale != 0) {
+			shader += "lut_lookup_result *= " + std::to_string(scales[scale]) + ";\n";
+		}
 	}
+}
+
+void FragmentGenerator::compileFog(std::string& shader, const PICA::FragmentConfig& config) {
+	if (config.fogConfig.mode != FogMode::Fog) {
+		return;
+	}
+
+	float r = config.fogConfig.fogColorR / 255.0f;
+	float g = config.fogConfig.fogColorG / 255.0f;
+	float b = config.fogConfig.fogColorB / 255.0f;
+
+	if (config.fogConfig.flipDepth) {
+		shader += "float fog_index = (1.0 - depth) * 128.0;\n";
+	} else {
+		shader += "float fog_index = depth * 128.0;\n";
+	}
+
+	shader += "float clamped_index = clamp(floor(fog_index), 0.0, 127.0);";
+	shader += "float delta = fog_index - clamped_index;";
+	shader += "vec3 fog_color = vec3(" + std::to_string(r) + ", " + std::to_string(g) + ", " + std::to_string(b) + ");";
+	shader += "vec2 value = texelFetch(u_tex_luts, ivec2(int(clamped_index), 24), 0).rg;"; // fog LUT is past the light LUTs
+	shader += "float fog_factor = clamp(value.r + value.g * delta, 0.0, 1.0);";
+	shader += "combinerOutput.rgb = mix(fog_color, combinerOutput.rgb, fog_factor);";
 }
